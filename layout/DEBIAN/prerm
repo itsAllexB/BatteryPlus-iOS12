@@ -1,0 +1,5 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# batteryplusd only reads the battery state, so stopping it is all that is needed.
+launchctl unload /Library/LaunchDaemons/com.itsallexb.batteryplusd.plist >/dev/null 2>&1
+exit 0

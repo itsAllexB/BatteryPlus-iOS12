@@ -1,0 +1,7 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+P=/Library/LaunchDaemons/com.itsallexb.batteryplusd.plist
+chown root:wheel "$P" 2>/dev/null; chmod 644 "$P" 2>/dev/null
+launchctl unload "$P" >/dev/null 2>&1
+launchctl load "$P" >/dev/null 2>&1
+exit 0

@@ -1,0 +1,4 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+if [ "$1" = purge ]; then rm -f /var/mobile/Library/Preferences/com.itsallexb.batteryplus.plist; fi
+exit 0
