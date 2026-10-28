@@ -23,6 +23,7 @@ TOOL_NAME = batteryplusd
 batteryplusd_FILES = daemon/main.m
 batteryplusd_FRAMEWORKS = Foundation IOKit CoreFoundation
 batteryplusd_CFLAGS = -fobjc-arc
+batteryplusd_CODESIGN_FLAGS = -Sdaemon/entitlements.plist
 batteryplusd_INSTALL_PATH = /usr/libexec
 
 SUBPROJECTS += ccmodule

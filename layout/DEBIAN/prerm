@@ -1,5 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
-# batteryplusd only reads the battery state, so stopping it is all that is needed.
+# Stop batteryplusd, then give iOS back its own 80% Low Power Mode turn-off (see daemon/main.m).
+# batteryplusd only reads the battery state, so nothing else needs undoing.
 launchctl unload /Library/LaunchDaemons/com.itsallexb.batteryplusd.plist >/dev/null 2>&1
+/usr/libexec/batteryplusd restore >/dev/null 2>&1
 exit 0

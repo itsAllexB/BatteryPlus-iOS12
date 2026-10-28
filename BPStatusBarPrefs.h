@@ -13,11 +13,9 @@
 #define kBPPrefsChangedName "com.itsallexb.batteryplus/prefschanged"
 #define kBPPrefsDomain CFSTR("com.itsallexb.batteryplus")
 
-// bit 8: state is valid; bit 0: Battery Colours; bit 1: Percentage Inside Icon.
-static inline void BPStatusBarPrefsDecode(uint64_t v, BOOL *colors, BOOL *percentInside) {
-    if (!(v & 0x100)) { *colors = YES; *percentInside = NO; return; } // defaults
-    *colors = (v & 1) != 0;
-    *percentInside = (v & 2) != 0;
+// bit 8: state is valid; bit 1: Percentage Inside Icon. (Bit 0 was Battery Colours, before 1.2.0.)
+static inline BOOL BPStatusBarPrefsDecode(uint64_t v) {
+    return (v & 0x100) && (v & 2); // off by default
 }
 
 static inline BOOL BPPrefsBool(CFStringRef key, BOOL def) {
@@ -31,7 +29,7 @@ static inline BOOL BPPrefsBool(CFStringRef key, BOOL def) {
 
 static inline void BPStatusBarPrefsPublish(void) {
     CFPreferencesAppSynchronize(kBPPrefsDomain);
-    uint64_t v = 0x100 | (BPPrefsBool(CFSTR("sbColors"), YES) ? 1 : 0) | (BPPrefsBool(CFSTR("sbPercentInside"), NO) ? 2 : 0);
+    uint64_t v = 0x100 | (BPPrefsBool(CFSTR("sbPercentInside"), NO) ? 2 : 0);
     int t;
     if (notify_register_check(kBPStatusBarStateName, &t) == NOTIFY_STATUS_OK) {
         uint64_t old = 0;

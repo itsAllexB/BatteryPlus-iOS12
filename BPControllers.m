@@ -4,7 +4,7 @@
 #import "BPControllers.h"
 #import "BPBattery.h"
 #import "BPStatusBarPrefs.h"
-#import <sys/utsname.h>
+#import <dlfcn.h>
 
 static PSSpecifier *BPGroup(NSString *ident, NSString *name, NSString *footer) {
     PSSpecifier *g = name ? [PSSpecifier groupSpecifierWithName:name] : [PSSpecifier emptyGroupSpecifier];
@@ -21,7 +21,7 @@ static PSSpecifier *BPValueRow(id target, NSString *ident, NSString *name, NSStr
 }
 
 // Write through cfprefsd before telling the daemon and the status bars, so they read the new value.
-static BOOL BPWritePref(id value, PSSpecifier *specifier) {
+BOOL BPWritePref(id value, PSSpecifier *specifier) {
     NSString *domain = [specifier propertyForKey:@"defaults"], *key = [specifier propertyForKey:@"key"];
     if (!domain.length || !key.length) return NO;
     CFPreferencesSetAppValue((__bridge CFStringRef)key, (__bridge CFPropertyListRef)value, (__bridge CFStringRef)domain);
@@ -31,12 +31,51 @@ static BOOL BPWritePref(id value, PSSpecifier *specifier) {
     return YES;
 }
 
-static id BPReadPref(PSSpecifier *specifier) {
+id BPReadPref(PSSpecifier *specifier) {
     NSString *domain = [specifier propertyForKey:@"defaults"], *key = [specifier propertyForKey:@"key"];
     if (!domain.length || !key.length) return nil;
     CFPreferencesAppSynchronize((__bridge CFStringRef)domain);
     id v = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)domain);
     return v ?: [specifier propertyForKey:@"default"];
+}
+
+void BPSetPref(NSString *key, id value) {
+    CFPreferencesSetAppValue((__bridge CFStringRef)key, (__bridge CFPropertyListRef)value, (__bridge CFStringRef)kBPDomain);
+    CFPreferencesAppSynchronize((__bridge CFStringRef)kBPDomain);
+    BPStatusBarPrefsPublish();
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), (__bridge CFStringRef)kBPNotification, NULL, NULL, YES);
+}
+
+BOOL BPPrefIsOn(NSString *key) {
+    CFPreferencesAppSynchronize((__bridge CFStringRef)kBPDomain);
+    id v = (__bridge_transfer id)CFPreferencesCopyAppValue((__bridge CFStringRef)key, (__bridge CFStringRef)kBPDomain);
+    return [v respondsToSelector:@selector(boolValue)] && [v boolValue];
+}
+
+static NSInteger BPAutoLevel(void) {
+    CFPreferencesAppSynchronize((__bridge CFStringRef)kBPDomain);
+    id v = (__bridge_transfer id)CFPreferencesCopyAppValue(CFSTR("lpmAutoLevel"), (__bridge CFStringRef)kBPDomain);
+    NSInteger l = [v respondsToSelector:@selector(integerValue)] ? [v integerValue] : 20;
+    return (l >= 5 && l <= 20) ? l : 20;
+}
+
+@interface _CDBatterySaver : NSObject
++ (instancetype)batterySaver;
+- (void)setPowerMode:(long long)mode fromSource:(NSString *)source withCompletion:(void (^)(BOOL ok, NSError *error))completion;
+@end
+
+BOOL BPLowPowerOn(void) {
+    return [NSProcessInfo processInfo].lowPowerModeEnabled;
+}
+
+void BPSetLowPower(BOOL on, void (^done)(void)) {
+    if (!NSClassFromString(@"_CDBatterySaver")) dlopen("/System/Library/PrivateFrameworks/CoreDuet.framework/CoreDuet", RTLD_LAZY);
+    _CDBatterySaver *saver = [NSClassFromString(@"_CDBatterySaver") batterySaver];
+    NSString *const __unsafe_unretained *src = (NSString *const __unsafe_unretained *)dlsym(RTLD_DEFAULT, "kLPMSourceSettings");
+    if (!saver) { if (done) done(); return; }
+    [saver setPowerMode:on ? 1 : 0 fromSource:(src && *src) ? *src : @"Settings" withCompletion:^(BOOL ok, NSError *error) {
+        if (done) dispatch_async(dispatch_get_main_queue(), done);
+    }];
 }
 
 static PSSpecifier *BPSwitch(id target, NSString *ident, NSString *name, NSString *key, BOOL def) {
@@ -93,80 +132,11 @@ static PSSpecifier *BPSwitch(id target, NSString *ident, NSString *name, NSStrin
 
 @end
 
-#pragma mark - Charge Limit cell
-
-static const NSInteger kBPLimitSteps[] = {80, 85, 90, 95, 100};
-
-@implementation BPChargeLimitCell {
-    UISlider *_slider;
-    NSArray<UILabel *> *_marks;
-}
-
-- (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)rid specifier:(PSSpecifier *)specifier {
-    if ((self = [super initWithStyle:style reuseIdentifier:rid specifier:specifier])) {
-        self.selectionStyle = UITableViewCellSelectionStyleNone;
-        self.textLabel.text = nil;
-        _slider = [UISlider new];
-        _slider.minimumValue = 80;
-        _slider.maximumValue = 100;
-        _slider.value = 100;
-        _slider.enabled = NO;
-        [self.contentView addSubview:_slider];
-        NSMutableArray *marks = [NSMutableArray array];
-        for (NSUInteger i = 0; i < 5; i++) {
-            UILabel *l = [UILabel new];
-            l.text = [NSString stringWithFormat:@"%ld%%", (long)kBPLimitSteps[i]];
-            l.font = [UIFont systemFontOfSize:13];
-            l.textColor = [UIColor colorWithWhite:0.56 alpha:1];
-            l.textAlignment = NSTextAlignmentCenter;
-            [l sizeToFit];
-            [self.contentView addSubview:l];
-            [marks addObject:l];
-        }
-        _marks = marks;
-    }
-    return self;
-}
-
-- (void)refreshCellContentsWithSpecifier:(PSSpecifier *)specifier {
-    [super refreshCellContentsWithSpecifier:specifier];
-    self.textLabel.text = nil;
-    self.detailTextLabel.text = nil;
-    NSNumber *v = [specifier propertyForKey:@"value"];
-    _slider.value = v ? v.floatValue : 100;
-    BOOL enabled = [[specifier propertyForKey:@"enabled"] boolValue];
-    _slider.enabled = enabled;
-}
-
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    CGRect b = self.contentView.bounds;
-    CGFloat inset = MAX(self.separatorInset.left, 15);
-    _slider.frame = CGRectMake(inset, 10, b.size.width - 2 * inset, 30);
-    CGRect track = [_slider trackRectForBounds:_slider.bounds];
-    for (NSUInteger i = 0; i < _marks.count; i++) {
-        CGRect thumb = [_slider thumbRectForBounds:_slider.bounds trackRect:track value:kBPLimitSteps[i]];
-        UILabel *l = _marks[i];
-        CGPoint c = [self.contentView convertPoint:CGPointMake(CGRectGetMidX(thumb), 0) fromView:_slider];
-        l.center = CGPointMake(c.x, 52);
-    }
-}
-
-@end
-
 #pragma mark - Charging
 
 @implementation BPChargingController
 
 - (NSString *)title { return @"Charging"; }
-
-// iPad4,x are the A7 iPads (iPad Air, iPad mini 2 and 3), the hardware this was verified on.
-- (NSString *)chargeLimitFooter {
-    struct utsname u;
-    BOOL a7 = uname(&u) == 0 && strncmp(u.machine, "iPad4,", 6) == 0;
-    if (a7) return @"Not available on this iPad. A7 iPads like this one can't pause charging while power is connected: the power controller ignores the request that newer models use for this, so iPad always charges to 100%. BatteryPlus leaves charging alone rather than use an unsafe workaround.";
-    return @"Not available on this iPad. BatteryPlus has no verified, safe way to pause charging on it, so iPad charges to 100% as usual.";
-}
 
 - (NSString *)reminderFooter {
     NSNumber *level = (__bridge_transfer NSNumber *)CFPreferencesCopyAppValue(CFSTR("reminderLevel"), (__bridge CFStringRef)kBPDomain);
@@ -178,15 +148,6 @@ static const NSInteger kBPLimitSteps[] = {80, 85, 90, 95, 100};
     if (!_specifiers) {
         NSMutableArray *a = [NSMutableArray array];
         [a addObject:BPGroup(@"BP_INTRO", nil, @"Keeping iPad at full charge for long periods wears the battery faster. Unplugging it when it's around 80% helps preserve battery lifespan over time.")];
-
-        [a addObject:BPGroup(@"BP_LIMIT_GROUP", @"Charge Limit", [self chargeLimitFooter])];
-        PSSpecifier *limit = [PSSpecifier preferenceSpecifierNamed:@"Charge Limit" target:self set:NULL get:NULL detail:Nil cell:PSStaticTextCell edit:Nil];
-        limit.identifier = @"BP_LIMIT";
-        [limit setProperty:[BPChargeLimitCell class] forKey:@"cellClass"];
-        [limit setProperty:@68 forKey:@"height"];
-        [limit setProperty:@100 forKey:@"value"];
-        [limit setProperty:@NO forKey:@"enabled"];
-        [a addObject:limit];
 
         [a addObject:BPGroup(@"BP_REMINDER_GROUP", nil, [self reminderFooter])];
         PSSpecifier *sw = [PSSpecifier preferenceSpecifierNamed:@"Unplug Reminder" target:self set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:) detail:Nil cell:PSSwitchCell edit:Nil];
@@ -225,30 +186,84 @@ static const NSInteger kBPLimitSteps[] = {80, 85, 90, 95, 100};
 
 @end
 
-#pragma mark - Status Bar
+#pragma mark - Low Power Mode
 
-@implementation BPStatusBarController
+// Settings > Battery > Low Power Mode. Automatic (batteryplusd turns it on at the chosen level and
+// off at 80%) above Manual (the switch itself). What Automatic turned on is turned off again at 80%;
+// what you turn on yourself stays on until you turn it off (see daemon/main.m).
+@implementation BPLowPowerController
 
-- (NSString *)title { return @"Status Bar"; }
+- (NSString *)title { return @"Low Power Mode"; }
+
+- (instancetype)init {
+    if ((self = [super init]))
+        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(bp_powerStateChanged:) name:NSProcessInfoPowerStateDidChangeNotification object:nil];
+    return self;
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)bp_powerStateChanged:(NSNotification *)n {
+    dispatch_async(dispatch_get_main_queue(), ^{ [self reloadSpecifiers]; });
+}
 
 - (NSArray *)specifiers {
     if (!_specifiers) {
+        BOOL autoOn = BPPrefIsOn(@"lpmAuto");
+        NSInteger level = BPAutoLevel();
         NSMutableArray *a = [NSMutableArray array];
-        [a addObject:BPGroup(@"BP_SB_COLORS_GROUP", nil, @"Like modern iOS, the battery icon turns yellow in Low Power Mode (also while charging), green while iPad is charging, and red at 20% or less. Turn this off for the iOS 12 colours.")];
-        [a addObject:BPSwitch(self, @"BP_SB_COLORS", @"Battery Colours", @"sbColors", YES)];
-        [a addObject:BPGroup(@"BP_SB_PERCENT_GROUP", nil, @"Shows the battery percentage inside the battery icon, like modern iOS, whether or not Battery Percentage is on. Turn this off to keep the iOS 12 percentage next to the icon.")];
-        [a addObject:BPSwitch(self, @"BP_SB_PERCENT", @"Percentage Inside Icon", @"sbPercentInside", NO)];
+
+        NSString *autoFooter = autoOn
+            ? [NSString stringWithFormat:@"Low Power Mode turns on when the battery drops to %ld%%, and off again when iPad charges to 80%%.", (long)level]
+            : @"Turns Low Power Mode on when the battery is low, and off again when iPad charges to 80%.";
+        [a addObject:BPGroup(@"BP_LPM_AUTO_GROUP", @"Automatic", autoFooter)];
+        [a addObject:BPSwitch(self, @"BP_LPM_AUTO", @"Turn On Automatically", @"lpmAuto", NO)];
+        if (autoOn) {
+            PSSpecifier *lvl = [PSSpecifier preferenceSpecifierNamed:@"Turn On At" target:self set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:) detail:NSClassFromString(@"PSListItemsController") cell:PSLinkListCell edit:Nil];
+            lvl.identifier = @"BP_LPM_AUTO_LEVEL";
+            [lvl setProperty:kBPDomain forKey:@"defaults"];
+            [lvl setProperty:@"lpmAutoLevel" forKey:@"key"];
+            [lvl setProperty:@20 forKey:@"default"];
+            [lvl setValues:@[@5, @10, @15, @20] titles:@[@"5%", @"10%", @"15%", @"20%"]];
+            [a addObject:lvl];
+        }
+
+        NSString *manualFooter;
+        if (BPLowPowerOn() && BPPrefIsOn(@"lpmAutoActive"))
+            manualFooter = [NSString stringWithFormat:@"Low Power Mode was turned on automatically and turns off when iPad charges to 80%%. If you turn it off, it stays off until the battery drops to %ld%% again.", (long)level];
+        else
+            manualFooter = @"Low Power Mode temporarily reduces background activity like downloads and mail fetch until you can fully charge your iPad. When you turn it on yourself, here or in Control Center, it stays on until you turn it off.";
+        [a addObject:BPGroup(@"BP_LPM_MANUAL_GROUP", @"Manual", manualFooter)];
+        PSSpecifier *sw = [PSSpecifier preferenceSpecifierNamed:@"Low Power Mode" target:self set:@selector(bp_setLowPower:specifier:) get:@selector(bp_lowPower:) detail:Nil cell:PSSwitchCell edit:Nil];
+        sw.identifier = @"BP_LPM_MANUAL";
+        [a addObject:sw];
         _specifiers = a;
     }
     return _specifiers;
 }
 
+- (id)bp_lowPower:(PSSpecifier *)specifier {
+    return @(BPLowPowerOn());
+}
+
+- (void)bp_setLowPower:(id)value specifier:(PSSpecifier *)specifier {
+    BPSetLowPower([value boolValue], ^{ [self reloadSpecifiers]; });
+}
+
 - (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier {
     if (!BPWritePref(value, specifier)) [super setPreferenceValue:value specifier:specifier];
+    if ([[specifier propertyForKey:@"key"] isEqualToString:@"lpmAuto"]) [self reloadSpecifiers]; // shows or hides Turn On At
 }
 
 - (id)readPreferenceValue:(PSSpecifier *)specifier {
     return BPReadPref(specifier) ?: [super readPreferenceValue:specifier];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self reloadSpecifiers]; // the footers name the chosen level and the current state
 }
 
 @end
