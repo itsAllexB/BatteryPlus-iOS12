@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 itsAllexB
 
-// BatteryPlus status bar: battery colours and the percentage inside the battery, like current iOS.
+// BatteryPlus status bar: battery colours and the percentage inside the battery, like modern iOS.
 //
 // Loaded into every UIKit process, because on iOS 12 each app draws its own status bar.
 //
-// Which status bar: iOS 12 iPads (checked on an iPad mini 2 in SpringBoard, the lock screen,
-// Control Center and apps) use the classic UIStatusBar, not the iPhone X _UIStatusBar. The battery
+// Which status bar: iOS 12 iPads (checked on an iPad mini 2 in SpringBoard, the lock screen and
+// apps) use the classic UIStatusBar, not the iPhone X _UIStatusBar. Control Center is the exception:
+// its own status bar, which fades in while it opens, is an iPhone X style _UIStatusBar (see "Control
+// Center" below). In the classic one the battery
 // is a UIStatusBarBatteryItemView whose -_contentsImage renders an image: the outline image, then
 // -[UIStatusBarForegroundStyleAttributes drawBatteryInsidesWithSize:capacity:style:] fills the
 // inside with the colour from -_batteryColorForCapacity:lowCapacity:style:usingTintColor:. "style" is
@@ -21,11 +23,23 @@
 // iOS 12 itself uses: Low Power Mode yellow, then red at 10% on iPad (20% on iPhone) even while
 // charging, then green while charging. With the option off, that stock behaviour is untouched.
 //
-// Percentage inside the icon (when that option and Battery Percentage are on): the separate
-// percentage item is not shown and the battery draws the number inside itself. The body is a dim
+// Percentage inside the icon (when that option is on, whether or not Battery Percentage is): the
+// separate percentage item is not shown and the battery draws the number inside itself. The body is a dim
 // track, the fill covers the charge level in the colour above, and the digits are cut out of both,
 // so they read on light and dark status bars at every level. The charging bolt stays beside the
 // battery, as in iOS 12.
+//
+// Low Power Mode: iOS 12 also turns the "100 %" on whenever Low Power Mode is on
+// (-[SBStatusBarStateAggregator _updateBatteryItems:] enables it for Low Power Mode, the Battery
+// Percentage switch or the internal showBatteryLevel default). BatteryPlus leaves it to the switch,
+// so Low Power Mode only turns the battery yellow. (iOS 12 still shows it on the lock screen while
+// iPad is charging; that is left as it is.)
+//
+// Control Center: its _UIStatusBar draws the battery with a _UIBatteryView (in a
+// _UIStatusBarBatteryItem), which on iOS 12 can already draw the number inside itself
+// (showsPercentage). BatteryPlus turns that on and hides the item's separate "100 %" when the
+// percentage is inside, and gives the fill the same colours as above. Without this, Control
+// Center's battery switched back to the iOS 12 look while it opened.
 //
 // Nothing polls: UIKit's own battery updates, the Low Power Mode notification and the BatteryPlus
 // settings notification trigger every redraw, and the rendered image stays cached by UIKit.
@@ -54,6 +68,33 @@
 @interface UIStatusBarBatteryItemView : UIStatusBarItemView
 - (void)setCachedImageSet:(id)set;
 @end
+@interface SBStatusBarDefaults : NSObject
+- (BOOL)showBatteryPercentage;
+- (BOOL)showBatteryLevel;
+@end
+@interface BSPlatform : NSObject
++ (instancetype)sharedInstance;
+- (BOOL)hasGasGauge;
+@end
+@interface _UIBatteryView : UIView
+@property (nonatomic) BOOL showsPercentage;
+@property (nonatomic) double chargePercent;
+@property (nonatomic) long long chargingState;
+@property (nonatomic) BOOL saverModeActive;
+@property (nonatomic) BOOL showsInlineChargingIndicator;
+- (void)_updateFillColor;
+@end
+@interface _UIStatusBar : UIView
+- (void)updateWithAnimations:(NSArray *)animations;
+@end
+@interface _UIStatusBarItem : NSObject
+- (_UIStatusBar *)statusBar;
+- (void)setNeedsUpdate;
+@end
+@interface _UIStatusBarBatteryItem : _UIStatusBarItem
++ (id)percentDisplayIdentifier;
+- (_UIBatteryView *)batteryView;
+@end
 @interface UIView (BPStatusBar)
 - (void)forceUpdateToData:(const void *)rawData animated:(BOOL)animated;
 @end
@@ -63,13 +104,8 @@
 static BOOL gColors = YES, gPercentInside = NO, gLowPower;
 static int gPercentItemType = -1;
 static NSHashTable *gBatteryViews;
+static NSHashTable *gModernItems; // Control Center's _UIStatusBarBatteryItems
 static __weak UIStatusBarBatteryItemView *gDrawingView; // the battery whose image is being rendered
-
-static BOOL gPercentSettingOn; // Battery Percentage is on (UIKit would show the percentage item)
-
-static BOOL BPWantsPercentInside(void) {
-    return gPercentInside && gPercentSettingOn;
-}
 
 static int BPPercentItemType(void) {
     if (gPercentItemType == -1) {
@@ -167,6 +203,18 @@ static void BPRefreshBatteries(void) {
     }
 }
 
+// Control Center's status bar: the number inside, the separate percentage on or off, the fill colour.
+static void BPRefreshModern(void) {
+    for (_UIStatusBarBatteryItem *item in gModernItems.allObjects) {
+        _UIBatteryView *b = [item batteryView];
+        if ([b respondsToSelector:@selector(setShowsPercentage:)]) b.showsPercentage = gPercentInside;
+        if ([b respondsToSelector:@selector(_updateFillColor)]) [b _updateFillColor];
+        [item setNeedsUpdate];
+        _UIStatusBar *bar = [item statusBar];
+        if ([bar respondsToSelector:@selector(updateWithAnimations:)]) [bar updateWithAnimations:@[]];
+    }
+}
+
 // The percentage item comes and goes with the setting, so the status bars re-run their layout.
 static void BPRefreshStatusBars(void) {
     NSMutableSet *bars = [NSMutableSet set];
@@ -182,6 +230,8 @@ static void BPRefreshStatusBars(void) {
 
 #pragma mark - Hooks
 
+static char kBPModernBattery;
+
 %hook UIStatusBarForegroundStyleAttributes
 
 - (UIColor *)_batteryColorForCapacity:(int)capacity lowCapacity:(int)low style:(unsigned long long)style usingTintColor:(BOOL)tint {
@@ -195,7 +245,7 @@ static void BPRefreshStatusBars(void) {
 - (void)drawBatteryInsidesWithSize:(CGSize)size capacity:(int)capacity style:(unsigned long long)style {
     UIStatusBarBatteryItemView *v = gDrawingView;
     CGContextRef ctx = UIGraphicsGetCurrentContext();
-    if (!v || !ctx || !BPWantsPercentInside()) {
+    if (!v || !ctx || !gPercentInside) {
         %orig;
         return;
     }
@@ -221,19 +271,83 @@ static void BPRefreshStatusBars(void) {
 
 %hook UIStatusBarItem
 
-// Hide the separate "100 %" while the number is drawn inside the battery.
-// This is where UIKit decides whether the percentage item is shown, so it also tells the battery
-// whether Battery Percentage is on.
+// Hide the separate "100 %" while the number is drawn inside the battery. This is where UIKit
+// decides whether the percentage item is shown (Battery Percentage on, or Low Power Mode).
 + (BOOL)itemType:(int)type idiom:(long long)idiom canBeEnabledForData:(UIStatusBarComposedData *)data style:(id)style {
-    BOOL r = %orig;
-    if (type != BPPercentItemType()) return r;
-    if (r != gPercentSettingOn) {
-        gPercentSettingOn = r;
-        if (gPercentInside) dispatch_async(dispatch_get_main_queue(), ^{ BPRefreshBatteries(); });
-    }
-    return gPercentInside ? NO : r;
+    if (gPercentInside && type == BPPercentItemType()) return NO;
+    return %orig;
 }
 
+%end
+
+%hook _UIStatusBarBatteryItem
+
+- (id)applyUpdate:(id)update toDisplayItem:(id)displayItem {
+    id r = %orig;
+    [gModernItems addObject:self];
+    _UIBatteryView *b = [self batteryView];
+    if (b) {
+        objc_setAssociatedObject(b, &kBPModernBattery, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if ([b respondsToSelector:@selector(setShowsPercentage:)] && b.showsPercentage != gPercentInside) b.showsPercentage = gPercentInside;
+        if (gPercentInside && [b respondsToSelector:@selector(showsInlineChargingIndicator)] && b.showsInlineChargingIndicator)
+            b.showsInlineChargingIndicator = NO;
+    }
+    return r;
+}
+
+// The separate "100 %" next to the battery.
+- (BOOL)canEnableDisplayItem:(id)displayItem fromData:(id)data {
+    if (gPercentInside && [displayItem respondsToSelector:@selector(identifier)]
+        && [[displayItem identifier] isEqual:[[self class] percentDisplayIdentifier]])
+        return NO;
+    return %orig;
+}
+
+%end
+
+%hook _UIBatteryView
+
+// iOS 12 draws the bolt instead of the number while charging. With the number inside, the number
+// stays and the green fill shows charging. (Control Center's iPad status bar has no separate bolt
+// next to the battery, unlike the classic status bar.)
+- (void)setShowsInlineChargingIndicator:(BOOL)inlineBolt {
+    if (gPercentInside && objc_getAssociatedObject(self, &kBPModernBattery)) inlineBolt = NO;
+    %orig(inlineBolt);
+}
+
+- (BOOL)_currentlyShowsPercentage {
+    if (gPercentInside && objc_getAssociatedObject(self, &kBPModernBattery)) return YES;
+    return %orig;
+}
+
+- (UIColor *)_batteryFillColor {
+    if (!gColors || !objc_getAssociatedObject(self, &kBPModernBattery)) return %orig;
+    if (self.saverModeActive || gLowPower) return [UIColor systemYellowColor]; // also while charging
+    if (self.chargingState != 0) return [UIColor systemGreenColor];          // whatever the level
+    if (self.chargePercent <= 0.20) return [UIColor systemRedColor];
+    return %orig;
+}
+
+%end
+
+// SpringBoard only: Low Power Mode doesn't force the percentage on (see the top of this file).
+%group SpringBoard
+%hook SBStatusBarStateAggregator
+
+- (BOOL)_setItem:(int)item enabled:(BOOL)enabled {
+    if (enabled && item == BPPercentItemType()) {
+        Ivar iv = class_getInstanceVariable(object_getClass(self), "_statusBarDefaults");
+        SBStatusBarDefaults *d = iv ? object_getIvar(self, iv) : nil;
+        BSPlatform *platform = [objc_getClass("BSPlatform") sharedInstance];
+        if ([d respondsToSelector:@selector(showBatteryPercentage)] && [d respondsToSelector:@selector(showBatteryLevel)]
+            && [platform respondsToSelector:@selector(hasGasGauge)] && [platform hasGasGauge]
+            && ![d showBatteryPercentage] && ![d showBatteryLevel])
+            enabled = NO;
+    }
+    return %orig(item, enabled);
+}
+
+%end
 %end
 
 #pragma mark - Setup
@@ -256,16 +370,19 @@ static void BPReadPrefs(void) {
     @autoreleasepool {
         if (!objc_getClass("UIStatusBarBatteryItemView") || !objc_getClass("UIStatusBarForegroundStyleAttributes")) return;
         gBatteryViews = [NSHashTable weakObjectsHashTable];
+        gModernItems = [NSHashTable weakObjectsHashTable];
         notify_register_dispatch(kBPStatusBarStateName, &gPrefsToken, dispatch_get_main_queue(), ^(int t) {
             BOOL c = gColors, p = gPercentInside;
             BPReadPrefs();
             if (p != gPercentInside) BPRefreshStatusBars();
             else if (c != gColors) BPRefreshBatteries();
+            if (p != gPercentInside || c != gColors) BPRefreshModern();
         });
         // SpringBoard publishes the settings for every app (sandboxed apps can't read our preferences).
         // notifyd keeps a state only while someone is registered for the name, so this comes after
         // SpringBoard's own registration above, which lives as long as SpringBoard.
         if ([[NSBundle mainBundle].bundleIdentifier isEqualToString:@"com.apple.springboard"]) {
+            if (objc_getClass("SBStatusBarStateAggregator")) %init(SpringBoard);
             BPStatusBarPrefsPublish();
             int t;
             notify_register_dispatch(kBPPrefsChangedName, &t, dispatch_get_main_queue(), ^(int x) { BPStatusBarPrefsPublish(); });
@@ -273,7 +390,7 @@ static void BPReadPrefs(void) {
         notify_register_dispatch("com.apple.system.batterysavermode", &gLPMToken, dispatch_get_main_queue(), ^(int t) {
             BOOL old = gLowPower;
             BPReadLowPower();
-            if (old != gLowPower) BPRefreshBatteries();
+            if (old != gLowPower) { BPRefreshBatteries(); BPRefreshModern(); }
         });
         BPReadPrefs();
         BPReadLowPower();

@@ -1,8 +1,8 @@
 Package: com.itsallexb.batteryplus
 Name: BatteryPlus (iOS 12)
-Version: 1.1.0
+Version: 1.1.1
 Architecture: iphoneos-arm
-Description: Battery features of current iOS for iOS 12 iPads. Low Power Mode in Settings > Battery and in Control Center (with CCSupport), battery colours in the status bar (yellow in Low Power Mode, green while charging, red at 20%) and an optional percentage inside the battery icon. Battery Health with Maximum Capacity, Cycle Count and Manufacture Date from the battery's gas gauge, and an optional Unplug Reminder.
+Description: Battery features of modern iOS for iOS 12 iPads. Low Power Mode in Settings > Battery and in Control Center (with CCSupport), battery colours in the status bar like modern iOS (yellow in Low Power Mode, green while charging, red at 20%), and the battery percentage inside the battery icon, also like modern iOS (optional). Battery Health with Maximum Capacity, Cycle Count and Manufacture Date from the battery's gas gauge, and an optional Unplug Reminder.
 Maintainer: itsAllexB
 Author: itsAllexB
 Section: Tweaks

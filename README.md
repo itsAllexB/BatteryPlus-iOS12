@@ -2,14 +2,15 @@
 
 <h1 align="center">BatteryPlus (iOS 12)</h1>
 
-**The battery features of current iOS, on iOS 12 iPads.**
+**The battery features of modern iOS, on iOS 12 iPads.**
 
 On iOS 12, Apple keeps most battery features for iPhone. BatteryPlus brings them to iPad, in the iOS 12 style:
 
 - **Low Power Mode** in Settings > Battery and in Control Center. It is the real iOS mode, not a look-alike.
 - **Battery Health:** Maximum Capacity, Cycle Count and Manufacture Date, read from the battery itself.
 - **Charging:** an optional Unplug Reminder.
-- **Status bar:** the battery turns yellow in Low Power Mode, green while charging and red at 20% or less, and can show its percentage inside the icon.
+- **Battery colours**, like modern iOS: the battery turns yellow in Low Power Mode, green while charging and red at 20% or less.
+- **Percentage inside the battery icon**, like modern iOS (optional).
 
 This is an unofficial jailbreak tweak. It is not affiliated with or endorsed by Apple.
 
@@ -31,9 +32,9 @@ Control Center: Low Power Mode off, turned on, and iOS's "Low Power Mode: On" ba
 
 <img src="screenshots/control-center.png" alt="Low Power Mode module in Control Center, off and on" width="800">
 
-Battery colours in the status bar:
+Battery colours in the status bar, compared with iOS 12. They differ at 11 to 20% (red instead of white) and when charging at 10% or less (green instead of red):
 
-<img src="screenshots/status-bar-colours.png" alt="Status bar battery at 100% charging (green), 50% (white), 15% (red), 15% charging (green), 5% (red) and in Low Power Mode (yellow)" width="560">
+<img src="screenshots/status-bar-colours.png" alt="Status bar battery in nine states, in three columns: iOS 12, BatteryPlus colours, and BatteryPlus with the percentage inside the icon" width="700">
 
 Percentage inside the icon (optional), and in apps, in landscape and in Split View:
 
@@ -52,7 +53,7 @@ It turns on the real mode, so the system reacts as it does on iPhone. Verified o
 - Apps see it (`NSProcessInfo.lowPowerModeEnabled`), and iOS shows its own "Low Power Mode" alert the first time.
 - Dynamic wallpapers and parallax are turned off, and Auto-Lock is limited to 30 seconds.
 - Mail stops fetching and iCloud Photos pauses syncing. Background app refresh and automatic downloads follow the same system state.
-- The battery percentage is always shown, and the battery icon turns yellow.
+- The battery icon turns yellow. iOS 12 would also turn the battery percentage on; with BatteryPlus it follows the Battery Percentage switch, so you can keep it off.
 - iOS turns the mode off by itself when the battery charges back to 80%, as on iPhone.
 
 On A7 iPads (such as the iPad mini 2) Low Power Mode doesn't slow the CPU. iOS 12 only does that on newer chips. The other savings apply.
@@ -73,7 +74,7 @@ All values come straight from the battery's gas gauge. A value that the battery 
 
 ### Status bar
 
-- **Battery Colours** (on by default), with the rules of current iOS:
+- **Battery Colours** (on by default), with the rules of modern iOS:
 
   | State | Colour |
   | --- | --- |
@@ -83,7 +84,7 @@ All values come straight from the battery's gas gauge. A value that the battery 
   | Otherwise | the status bar colour (white or black) |
 
   With it off, iOS 12's own rules apply.
-- **Percentage Inside Icon** (off by default): when Battery Percentage is on, the number is drawn inside the battery icon instead of next to it, like current iOS. It reads at every level, on light and dark status bars.
+- **Percentage Inside Icon** (off by default): the number is drawn inside the battery icon instead of next to it, like modern iOS, whether or not Battery Percentage is on. It reads at every level, on light and dark status bars.
 - Works on the Home Screen, the lock screen, in Control Center and in every app, in portrait, landscape and Split View.
 - It costs nothing while idle: there are no timers. The battery is only redrawn when iOS updates the status bar or when Low Power Mode or these settings change.
 
@@ -120,7 +121,7 @@ Everything is in **Settings > Battery**:
   - **Unplug Reminder** (off by default) and **Remind At** (80%, 85%, 90%, 95% or 100%).
 - **Status Bar**:
   - **Battery Colours** (on by default).
-  - **Percentage Inside Icon** (off by default). Needs Battery Percentage on.
+  - **Percentage Inside Icon** (off by default). Works with Battery Percentage on or off.
 
 To add Low Power Mode to Control Center, open **Settings > Control Center > Customize Controls** (needs CCSupport).
 
@@ -130,6 +131,8 @@ To add Low Power Mode to Control Center, open **Settings > Control Center > Cust
 - The automatic turn-off at 80% is iOS's own. It was checked in the system, not by charging a drained battery.
 - Maximum Capacity is what the gas gauge reports. After a long time unused, or right after a battery replacement, the gauge can be off until it has seen a few full charge cycles.
 - Batteries before iPhone 15 don't store a first-use date, so there is no First Use row.
+- With Percentage Inside Icon on, Control Center's status bar shows charging only by the green fill. Unlike the main status bar, it has no separate bolt next to the battery on iPad.
+- iOS 12 also shows the battery percentage on the lock screen while iPad is charging. BatteryPlus leaves that as it is.
 
 ## Build from source
 

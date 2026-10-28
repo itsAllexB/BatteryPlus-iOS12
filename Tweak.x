@@ -2,7 +2,7 @@
 // Copyright (C) 2026 itsAllexB
 
 // BatteryPlus 1.1.0
-// Brings the Battery Health and Charging pages of current iOS to Settings > Battery on iOS 12 iPads,
+// Brings the Battery Health and Charging pages of modern iOS to Settings > Battery on iOS 12 iPads,
 // and the Low Power Mode switch that iOS 12 only shows on iPhone.
 //
 // Hook point (Preferences.app, iOS 12):

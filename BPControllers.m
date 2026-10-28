@@ -234,9 +234,9 @@ static const NSInteger kBPLimitSteps[] = {80, 85, 90, 95, 100};
 - (NSArray *)specifiers {
     if (!_specifiers) {
         NSMutableArray *a = [NSMutableArray array];
-        [a addObject:BPGroup(@"BP_SB_COLORS_GROUP", nil, @"Like current iOS, the battery icon turns yellow in Low Power Mode (also while charging), green while iPad is charging, and red at 20% or less. Turn this off for the iOS 12 colours.")];
+        [a addObject:BPGroup(@"BP_SB_COLORS_GROUP", nil, @"Like modern iOS, the battery icon turns yellow in Low Power Mode (also while charging), green while iPad is charging, and red at 20% or less. Turn this off for the iOS 12 colours.")];
         [a addObject:BPSwitch(self, @"BP_SB_COLORS", @"Battery Colours", @"sbColors", YES)];
-        [a addObject:BPGroup(@"BP_SB_PERCENT_GROUP", nil, @"Shows the battery percentage inside the battery icon, like current iOS. It applies when Battery Percentage is on in Settings > Battery. Turn this off to keep the iOS 12 percentage next to the icon.")];
+        [a addObject:BPGroup(@"BP_SB_PERCENT_GROUP", nil, @"Shows the battery percentage inside the battery icon, like modern iOS, whether or not Battery Percentage is on. Turn this off to keep the iOS 12 percentage next to the icon.")];
         [a addObject:BPSwitch(self, @"BP_SB_PERCENT", @"Percentage Inside Icon", @"sbPercentInside", NO)];
         _specifiers = a;
     }
